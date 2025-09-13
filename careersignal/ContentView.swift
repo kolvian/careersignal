@@ -14,19 +14,21 @@ struct ContentView: View {
 
     var body: some View {
         NavigationView {
-            List(viewModel.internships) { internship in
-                VStack(alignment: .leading) {
-                    Text(internship.company)
-                        .font(.headline)
-                    Text(internship.role)
-                        .font(.subheadline)
-                    Text(internship.location)
-                        .font(.caption)
-                    Link("Apply", destination: URL(string: internship.link)!)
-                        .font(.caption)
-                    Text("Posted: \(internship.datePosted)")
-                        .font(.caption2)
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.csBackgroundTop, Color.csBackgroundBottom]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                List(viewModel.internships) { internship in
+                    InternshipRow(internship: internship)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Internships 2026")
             .toolbar {
@@ -34,6 +36,7 @@ struct ContentView: View {
                     Button(action: { showSettings = true }) {
                         Image(systemName: "gear")
                     }
+                    .tint(Color.csAccent)
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -44,7 +47,10 @@ struct ContentView: View {
                 viewModel.startPolling()
             }
         }
+        .preferredColorScheme(.dark)
+        .tint(Color.csAccent)
     }
+}
 // MARK: - Notification Settings View
 struct NotificationSettingsView: View {
     @AppStorage("notificationsEnabled") private var notificationsEnabled: Bool = true
@@ -105,7 +111,7 @@ class InternshipViewModel: ObservableObject {
         }
     }
 
-    // Simple Markdown Table Parser
+    // Simple Markdown/HTML Table Parser with robust link extraction
     func parseInternships(from markdown: String) -> [Internship] {
         var internships: [Internship] = []
         let lines = markdown.components(separatedBy: "\n")
@@ -118,7 +124,8 @@ class InternshipViewModel: ObservableObject {
                     let company = columns[1]
                     let role = columns[2]
                     let location = columns[3]
-                    let link = columns[4].replacingOccurrences(of: "<a href=\"", with: "").replacingOccurrences(of: "\">", with: "").replacingOccurrences(of: "<img src=", with: "").components(separatedBy: ">" ).first ?? ""
+                    let linkText = columns[4]
+                    let link = extractFirstURL(from: linkText) ?? ""
                     let datePosted = columns[5]
                     internships.append(Internship(company: company, role: role, location: location, link: link, datePosted: datePosted))
                 }
@@ -126,10 +133,104 @@ class InternshipViewModel: ObservableObject {
         }
         return internships
     }
+
+    // Extracts the first URL from markdown or HTML content
+    private func extractFirstURL(from text: String) -> String? {
+        // Try HTML: <a href="URL">
+        if let hrefRange = text.range(of: "href=\""),
+           let endQuote = text[hrefRange.upperBound...].firstIndex(of: "\"") {
+            let url = String(text[hrefRange.upperBound..<endQuote])
+            return url
+        }
+        // Try Markdown: [label](URL)
+        if let openParen = text.firstIndex(of: "("), let closeParen = text.firstIndex(of: ")"), openParen < closeParen {
+            let url = String(text[text.index(after: openParen)..<closeParen])
+            if url.starts(with: "http://") || url.starts(with: "https://") { return url }
+        }
+        // Fallback: regex-like scan for http(s):// until a space, quote, angle or paren
+        if let range = text.range(of: "https?://[A-Za-z0-9._%/\\-?#=&:+~]+", options: .regularExpression) {
+            return String(text[range])
+        }
+        return nil
+    }
 }
+// MARK: - Row View
+struct InternshipRow: View {
+    let internship: Internship
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(internship.company)
+                .font(.system(.headline, design: .monospaced))
+                .foregroundColor(.white)
+
+            Text(internship.role)
+                .font(.system(.subheadline, design: .monospaced))
+                .foregroundColor(Color.csAccent)
+
+            HStack {
+                Image(systemName: "mappin.and.ellipse").foregroundColor(Color.csAccent)
+                Text(internship.location)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                if let url = URL(string: internship.link) {
+                    ApplyButton(url: url)
+                } else {
+                    Text("Apply link unavailable")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                Text("Posted: \(internship.datePosted)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 2)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+        .fill(Color.csCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+            .stroke(Color.csAccent.opacity(0.2), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.5), radius: 8, x: 0, y: 4)
+        )
     }
 }
 
-#Preview {
-    ContentView()
+// Compact capsule-styled Apply button with tight leading padding
+private struct ApplyButton: View {
+    let url: URL
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button(action: { openURL(url) }) {
+            Text("Apply")
+                .font(.system(.caption, design: .monospaced))
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .padding(.vertical, 8)
+                .padding(.leading, 12)   // tighter leading
+                .padding(.trailing, 12)
+                .background(
+                    Capsule().fill(Color.csAccent)
+                )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+    }
 }
+
+#if DEBUG
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
+}
+#endif
